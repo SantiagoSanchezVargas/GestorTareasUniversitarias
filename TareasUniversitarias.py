@@ -2,301 +2,435 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 from tkcalendar import DateEntry
 from datetime import datetime, timedelta
-from plyer import notification
-import json
-import os
-import math
+import json, os
 
-tareas = []
-hora_seleccionada = "12:00"
+# ==========================
+# CONFIG
+# ==========================
+ARCHIVO = "tareas.json"
+USUARIO = "Santiago"
 
-colores_materias = {
-    "Operativa": "#3028C7",
-    "Big Data": "#6BCB77",
-    "Analisis numerico": "#210B31",
-    "Comunicación de datos": "#6A4C93",
-    "Emprendimiento e innovación": "#F7B32B",
-    "Ciencia, tecnología e innovación": "#4D908E",
-    "Seguridad en hardware": "#FF0000",
+MATERIAS = [
+    "Operativa",
+    "Big Data",
+    "Analisis numerico",
+    "Comunicación de datos",
+    "Emprendimiento e innovación",
+    "Ciencia, tecnología e innovación",
+    "Seguridad en hardware",
+]
+
+COLORES_MATERIAS = {
+    "Operativa": "#6EC1FF",
+    "Big Data": "#7CFFB2",
+    "Analisis numerico": "#BFA6FF",
+    "Comunicación de datos": "#8ED1FC",
+    "Emprendimiento e innovación": "#FFE066",
+    "Ciencia, tecnología e innovación": "#A0E7E5",
+    "Seguridad en hardware": "#FF8FA3",
 }
 
-ARCHIVO = "tareas.json"
+COLORES_ESTADO = {
+    "Pendiente": "#d6ecff",
+    "Proximo":   "#c2f0ff",
+    "Urgente":   "#ffb3b3",
+    "Vencido":   "#ff8c8c",
+    "Entregado": "#caffbf",
+}
+
+ESTADOS = ["Pendiente", "Proximo", "Urgente", "Vencido", "Entregado"]
+
 
 # ==========================
-# GUARDAR / CARGAR
+# CLASE PRINCIPAL
 # ==========================
-def guardar_tareas():
-    with open(ARCHIVO, "w") as f:
-        json.dump([{**t, "fecha": t["fecha"].strftime("%Y-%m-%d %H:%M")} for t in tareas], f, indent=4)
+class App:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.root.title("Gestor de Tareas")
+        self.root.geometry("1200x650")
+        self.root.configure(bg="#cfe9ff")
+        self.filtro_materia = tk.StringVar(value="Todas")
+        self.tareas: list[dict] = []
+        self.hora_var = tk.StringVar(value="12:00")
 
-def cargar_tareas():
-    if not os.path.exists(ARCHIVO):
-        return
-    with open(ARCHIVO) as f:
-        for t in json.load(f):
-            t["fecha"] = datetime.strptime(t["fecha"], "%Y-%m-%d %H:%M")
-            tareas.append(t)
+        self._cargar_tareas()
+        self._construir_ui()
+        self.actualizar_tablero()
 
-# ==========================
-# FUNCIONES
-# ==========================
-def agregar_tarea():
-    nombre = entry_nombre.get()
+    # ----------------------
+    # PERSISTENCIA
+    # ----------------------
+    def _cargar_tareas(self):
+        if not os.path.exists(ARCHIVO):
+            return
+        try:
+            with open(ARCHIVO) as f:
+                for t in json.load(f):
+                    t["fecha"] = datetime.strptime(t["fecha"], "%Y-%m-%d %H:%M")
+                    self.tareas.append(t)
+        except (json.JSONDecodeError, KeyError, ValueError):
+            messagebox.showerror("Error", "No se pudo cargar el archivo de tareas.")
 
-    if nombre.strip() == "" or "Ingresa" in nombre:
-        messagebox.showwarning("Error", "Escribe el nombre de la tarea")
-        return
+    def _guardar_tareas(self):
+        with open(ARCHIVO, "w") as f:
+            json.dump(
+                [{**t, "fecha": t["fecha"].strftime("%Y-%m-%d %H:%M")} for t in self.tareas],
+                f, indent=4
+            )
 
-    try:
-        fecha_hora = datetime.strptime(
-            f"{cal.get_date().strftime('%d/%m/%Y')} {hora_seleccionada}",
-            "%d/%m/%Y %H:%M"
-        )
-    except:
-        messagebox.showerror("Error", "Hora inválida")
-        return
-
-    tareas.append({
-        "nombre": nombre,
-        "materia": combo_materia.get(),
-        "fecha": fecha_hora,
-        "entregado": False,
-        "notificado": False,
-        "vencido_notificado": False
-    })
-
-    guardar_tareas()
-    actualizar_tablero()
-
-def cambiar_estado(tarea, estado):
-    tarea["entregado"] = estado
-    guardar_tareas()
-    actualizar_tablero()
-
-def eliminar_tarea(tarea):
-    tareas.remove(tarea)
-    guardar_tareas()
-    actualizar_tablero()
-
-# ==========================
-# ESTADOS MEJORADOS 🔥
-# ==========================
-def get_estado(t):
-    ahora = datetime.now()
-    diff = t["fecha"] - ahora
-
-    if t["entregado"]:
-        return "Entregado"
-    elif diff < timedelta(0):
-        return "Vencido"
-    elif diff < timedelta(days=1):
-        return "Urgente"
-    elif timedelta(days=1) <= diff <= timedelta(days=2):
-        return "Proximo"
-    return "Pendiente"
-
-# ==========================
-# MENÚ DERECHO
-# ==========================
-def mostrar_menu(event, tarea):
-    menu = tk.Menu(root, tearoff=0)
-    menu.add_command(label="✔ Marcar entregado", command=lambda: cambiar_estado(tarea, True))
-    menu.add_command(label="↩ Volver a pendiente", command=lambda: cambiar_estado(tarea, False))
-    menu.add_separator()
-    menu.add_command(label="🗑 Eliminar", command=lambda: eliminar_tarea(tarea))
-    menu.tk_popup(event.x_root, event.y_root)
-
-# ==========================
-# TABLERO
-# ==========================
-def actualizar_tablero():
-    for col in columnas.values():
-        for w in col.winfo_children():
-            w.destroy()
-
-    for t in tareas:
-        estado = get_estado(t)
-
-        bg_color = "#2a2a40"
-        if estado == "Urgente":
-            bg_color = "#8B0000"
-
-        frame = tk.Frame(columnas[estado], bg=bg_color, pady=5)
-        frame.pack(fill="x", padx=5, pady=5)
-
-        color = colores_materias.get(t["materia"], "#999")
-
-        lbl = tk.Label(frame, text=t["nombre"], bg=color, fg="black")
-        lbl.pack(fill="x")
-
-        tk.Label(frame,
-                 text=t["fecha"].strftime("%d/%m %H:%M"),
-                 bg=bg_color, fg="white").pack()
-
-        frame.bind("<Button-3>", lambda e, tarea=t: mostrar_menu(e, tarea))
-        lbl.bind("<Button-3>", lambda e, tarea=t: mostrar_menu(e, tarea))
-
-# ==========================
-# NOTIFICACIONES
-# ==========================
-def verificar_notificaciones():
-    ahora = datetime.now()
-
-    for t in tareas:
-        if t["entregado"]:
-            continue
-
+    # ----------------------
+    # LÓGICA DE ESTADO
+    # ----------------------
+    @staticmethod
+    def get_estado(t: dict) -> str:
+        ahora = datetime.now()
         diff = t["fecha"] - ahora
 
-        if timedelta(days=1) <= diff <= timedelta(days=2) and not t["notificado"]:
-            notification.notify(title="📚 Próximo", message=f"{t['nombre']} en 1-2 días")
-            t["notificado"] = True
+        if t["entregado"]:
+            return "Entregado"
 
-        elif diff < timedelta(hours=24) and not t["vencido_notificado"]:
-            notification.notify(title="⚠ Urgente", message=t["nombre"])
-            t["vencido_notificado"] = True
+        if diff <= timedelta(0):
+            return "Vencido"
 
-    guardar_tareas()
-    root.after(60000, verificar_notificaciones)
+        # 🔥 Forzado manual
+        if t.get("manual") == "Urgente":
+            return "Urgente"
+
+        # 🔴 Urgente: faltan 4 días o menos
+        if diff <= timedelta(days=4):
+            return "Urgente"
+
+        # 🔵 Próximo: misma semana
+        if t["fecha"].isocalendar()[1] == ahora.isocalendar()[1]:
+            return "Proximo"
+
+        return "Pendiente"
+    # ----------------------
+    # ACCIONES
+    # ----------------------
+    def agregar_tarea(self):
+        nombre = self.entry_nombre.get().strip()
+        materia = self.combo_materia.get()
+
+        if not nombre:
+            messagebox.showwarning("Atención", "Escribe el nombre de la tarea.")
+            return
+        if not materia:
+            messagebox.showwarning("Atención", "Selecciona una materia.")
+            return
+
+        try:
+            fecha_hora = datetime.strptime(
+                f"{self.cal.get_date().strftime('%d/%m/%Y')} {self.hora_var.get()}",
+                "%d/%m/%Y %H:%M"
+            )
+        except ValueError:
+            messagebox.showerror("Error", "Formato de hora inválido (usa HH:MM).")
+            return
+
+        self.tareas.append({
+            "nombre": nombre,
+            "materia": materia,
+            "fecha": fecha_hora,
+            "entregado": False,
+            "manual": None,
+        })
+
+        self._guardar_tareas()
+        self.actualizar_tablero()
+        self.entry_nombre.delete(0, tk.END)
+
+    def cambiar_estado(self, t: dict, entregado: bool):
+        t["entregado"] = entregado
+        t["manual"] = None
+        self._guardar_tareas()
+        self.actualizar_tablero()
+
+    def marcar_urgente(self, t: dict):
+        t["manual"] = "Urgente"
+        self._guardar_tareas()
+        self.actualizar_tablero()
+
+    def eliminar_tarea(self, t: dict):
+        if not messagebox.askyesno("Confirmar", f"¿Eliminar '{t['nombre']}'?"):
+            return
+        try:
+            self.tareas.remove(t)
+        except ValueError:
+            pass  # ya fue eliminada (doble clic rápido)
+        self._guardar_tareas()
+        self.actualizar_tablero()
+
+    def editar_tarea(self, t: dict):
+        """Abre una ventana para editar nombre, materia y fecha/hora."""
+        v = tk.Toplevel(self.root)
+        v.title("Editar tarea")
+        v.geometry("320x240")
+        v.configure(bg="#e6f7ff")
+        v.grab_set()  # modal
+
+        tk.Label(v, text="Nombre", bg="#e6f7ff").pack(pady=(12, 2))
+        entry = tk.Entry(v, width=36)
+        entry.insert(0, t["nombre"])
+        entry.pack()
+
+        tk.Label(v, text="Materia", bg="#e6f7ff").pack(pady=(8, 2))
+        combo = ttk.Combobox(v, values=MATERIAS, state="readonly", width=33)
+        combo.set(t["materia"])
+        combo.pack()
+
+        tk.Label(v, text="Hora (HH:MM)", bg="#e6f7ff").pack(pady=(8, 2))
+        hora_e = tk.Entry(v, width=10)
+        hora_e.insert(0, t["fecha"].strftime("%H:%M"))
+        hora_e.pack()
+
+        def guardar():
+            nuevo_nombre = entry.get().strip()
+            nueva_materia = combo.get()
+            if not nuevo_nombre or not nueva_materia:
+                messagebox.showwarning("Atención", "Completa todos los campos.", parent=v)
+                return
+            try:
+                nueva_hora = datetime.strptime(hora_e.get(), "%H:%M")
+            except ValueError:
+                messagebox.showerror("Error", "Formato de hora inválido (HH:MM).", parent=v)
+                return
+            t["nombre"] = nuevo_nombre
+            t["materia"] = nueva_materia
+            t["fecha"] = t["fecha"].replace(hour=nueva_hora.hour, minute=nueva_hora.minute)
+            self._guardar_tareas()
+            self.actualizar_tablero()
+            v.destroy()
+
+        tk.Button(v, text="Guardar", bg="#4D96FF", fg="white", command=guardar).pack(pady=12)
+
+    # ----------------------
+    # MENÚ CONTEXTUAL
+    # ----------------------
+    def mostrar_menu(self, event, t: dict):
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="✏ Editar",     command=lambda: self.editar_tarea(t))
+        menu.add_separator()
+        menu.add_command(label="🔥 Urgente",   command=lambda: self.marcar_urgente(t))
+        menu.add_command(label="✔ Entregado",  command=lambda: self.cambiar_estado(t, True))
+        menu.add_command(label="↩ Pendiente",  command=lambda: self.cambiar_estado(t, False))
+        menu.add_separator()
+        menu.add_command(label="🗑 Eliminar",  command=lambda: self.eliminar_tarea(t))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    # ----------------------
+    # SELECTOR DE HORA
+    # ----------------------
+    def abrir_selector_hora(self):
+        v = tk.Toplevel(self.root)
+        v.title("Seleccionar hora")
+        v.geometry("220x180")
+        v.configure(bg="#e6f7ff")
+        v.grab_set()
+
+        # Inicializar con la hora actual
+        ahora_h, ahora_m = self.hora_var.get().split(":")
+
+        tk.Label(v, text="Hora (0-23)", bg="#e6f7ff").pack(pady=(16, 2))
+        spin_h = tk.Spinbox(v, from_=0, to=23, format="%02.0f", width=6)
+        spin_h.delete(0, tk.END)
+        spin_h.insert(0, ahora_h)
+        spin_h.pack()
+
+        tk.Label(v, text="Minutos (0-59)", bg="#e6f7ff").pack(pady=(8, 2))
+        spin_m = tk.Spinbox(v, from_=0, to=59, format="%02.0f", width=6)
+        spin_m.delete(0, tk.END)
+        spin_m.insert(0, ahora_m)
+        spin_m.pack()
+
+        def ok():
+            try:
+                h = int(spin_h.get())
+                m = int(spin_m.get())
+                if not (0 <= h <= 23 and 0 <= m <= 59):
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Error", "Hora inválida.", parent=v)
+                return
+            self.hora_var.set(f"{h:02d}:{m:02d}")
+            self.btn_hora.config(text=f"⏰ {self.hora_var.get()}")
+            v.destroy()
+
+        tk.Button(v, text="Aceptar", bg="#6EC1FF", command=ok).pack(pady=12)
+
+    # ----------------------
+    # TABLERO
+    # ----------------------
+    def actualizar_tablero(self):
+        for inner in self.columnas.values():
+            for w in inner.winfo_children():
+                w.destroy()
+
+        for t in self.tareas:
+            # ✅ FILTRO BIEN INDENTADO
+            if self.filtro_materia.get() != "Todas" and t["materia"] != self.filtro_materia.get():
+                continue
+
+            estado = self.get_estado(t)
+            inner = self.columnas[estado]
+
+            # ✅ USAR BORDE CORRECTAMENTE
+            borde = 2 if estado == "Urgente" else 1
+            card = tk.Frame(inner, bg="white", bd=borde, relief="solid")
+            card.pack(fill="x", padx=8, pady=5)
+
+            color_materia = COLORES_MATERIAS.get(t["materia"], "#ddd")
+            color_estado  = COLORES_ESTADO[estado]
+
+            barra = tk.Frame(card, bg=color_estado, width=6)
+            barra.pack(side="left", fill="y")
+
+            contenido = tk.Frame(card, bg=color_materia)
+            contenido.pack(side="left", fill="both", expand=True)
+
+            lbl_nombre = tk.Label(
+                contenido,
+                text=t["nombre"],
+                bg=color_materia,
+                fg="black",
+                font=("Segoe UI", 10, "bold"),
+                padx=6, anchor="w",
+                wraplength=160,
+                justify="left",
+            )
+            lbl_nombre.pack(fill="x")
+
+            lbl_info = tk.Label(
+                contenido,
+                text=f"{t['materia']} • {t['fecha'].strftime('%d/%m %H:%M')}",
+                bg=color_materia,
+                fg="#444",
+                font=("Segoe UI", 8),
+                padx=6, anchor="w",
+            )
+            lbl_info.pack(fill="x")
+
+            for widget in (card, barra, contenido, lbl_nombre, lbl_info):
+                widget.bind("<Button-3>", lambda e, tarea=t: self.mostrar_menu(e, tarea))
+    # ----------------------
+    # UI
+    # ----------------------
+    def _construir_ui(self):
+        # Encabezado
+        tk.Label(
+            self.root,
+            text=f"👋 Hola, {USUARIO}",
+            bg="#cfe9ff", fg="#003366",
+            font=("Segoe UI", 16, "bold")
+        ).pack(pady=(10, 0))
+
+        tk.Label(
+            self.root,
+            text="📚 Gestor de tareas universitarias",
+            bg="#cfe9ff", fg="#005b96"
+        ).pack()
+
+        # Panel de inputs
+        frame_inputs = tk.Frame(self.root, bg="#e6f7ff", pady=6)
+        frame_inputs.pack(fill="x", padx=10)
+
+        self.entry_nombre = tk.Entry(frame_inputs, width=28, font=("Segoe UI", 10))
+        self.entry_nombre.pack(side="left", padx=8, ipady=4)
+        self.entry_nombre.bind("<Return>", lambda _: self.agregar_tarea())
+        
+        self.combo_materia = ttk.Combobox(
+            frame_inputs, values=MATERIAS, state="readonly", width=28
+        )
+        self.combo_materia.pack(side="left", padx=4)
+        self.combo_filtro = ttk.Combobox(
+            frame_inputs,
+            values=["Todas"] + MATERIAS,
+            state="readonly",
+            width=20,
+            textvariable=self.filtro_materia
+        )
+        self.combo_filtro.pack(side="left", padx=4)
+        self.combo_filtro.bind("<<ComboboxSelected>>", lambda e: self.actualizar_tablero())
+
+        self.cal = DateEntry(frame_inputs, width=12)
+        self.cal.pack(side="left", padx=4)
+
+        self.btn_hora = tk.Button(
+            frame_inputs,
+            textvariable=None,
+            text=f"⏰ {self.hora_var.get()}",
+            bg="#6EC1FF",
+            command=self.abrir_selector_hora
+        )
+        self.btn_hora.pack(side="left", padx=4)
+
+        btn_add = tk.Button(
+            frame_inputs,
+            text="➕ Agregar",
+            bg="#4D96FF", fg="white",
+            font=("Segoe UI", 10, "bold"),
+            command=self.agregar_tarea,
+        )
+        btn_add.pack(side="left", padx=8)
+        self._hover(btn_add, "#4D96FF", "#6EC1FF")
+
+        # Tablero de columnas con scroll
+        board = tk.Frame(self.root, bg="#cfe9ff")
+        board.pack(fill="both", expand=True, padx=6, pady=8)
+
+        self.columnas: dict[str, tk.Frame] = {}
+        for estado in ESTADOS:
+            col_frame = tk.Frame(board, bg="#e6f7ff")
+            col_frame.pack(side="left", fill="both", expand=True, padx=4)
+
+            # Cabecera con color del estado
+            hdr = tk.Frame(col_frame, bg=COLORES_ESTADO[estado])
+            hdr.pack(fill="x")
+            tk.Label(
+                hdr, text=estado,
+                bg=COLORES_ESTADO[estado], fg="#003366",
+                font=("Segoe UI", 10, "bold"), pady=4
+            ).pack()
+
+            # Canvas + scrollbar para scroll vertical
+            canvas = tk.Canvas(col_frame, bg="#e6f7ff", highlightthickness=0)
+            scrollbar = tk.Scrollbar(col_frame, orient="vertical", command=canvas.yview)
+            canvas.configure(yscrollcommand=scrollbar.set)
+
+            scrollbar.pack(side="right", fill="y")
+            canvas.pack(side="left", fill="both", expand=True)
+
+            inner = tk.Frame(canvas, bg="#e6f7ff")
+            window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+            def _on_configure(event, c=canvas, wid=window_id):
+                c.configure(scrollregion=c.bbox("all"))
+                c.itemconfig(wid, width=c.winfo_width())
+
+            inner.bind("<Configure>", _on_configure)
+            canvas.bind("<Configure>", lambda e, c=canvas, wid=window_id:
+                        c.itemconfig(wid, width=c.winfo_width()))
+
+            # Scroll con rueda del mouse
+            def _mousewheel(event, c=canvas):
+                c.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+            canvas.bind("<MouseWheel>", _mousewheel)
+            inner.bind("<MouseWheel>", _mousewheel)
+
+            self.columnas[estado] = inner
+
+    @staticmethod
+    def _hover(btn: tk.Button, c1: str, c2: str):
+        btn.bind("<Enter>", lambda _: btn.config(bg=c2))
+        btn.bind("<Leave>", lambda _: btn.config(bg=c1))
+
 
 # ==========================
-# RELOJ
+# ENTRADA
 # ==========================
-def dibujar_reloj():
-    canvas.delete("all")
-
-    cx, cy, r = 60, 60, 50
-    canvas.create_oval(cx-r, cy-r, cx+r, cy+r, outline="white")
-
-    ahora = datetime.now()
-    h, m, s = ahora.hour % 12, ahora.minute, ahora.second
-
-    ang_s = math.radians(s*6 - 90)
-    ang_m = math.radians(m*6 - 90)
-    ang_h = math.radians(h*30 + m/2 - 90)
-
-    canvas.create_line(cx, cy, cx+r*0.9*math.cos(ang_s),
-                       cy+r*0.9*math.sin(ang_s), fill="red")
-
-    canvas.create_line(cx, cy, cx+r*0.7*math.cos(ang_m),
-                       cy+r*0.7*math.sin(ang_m), fill="white", width=2)
-
-    canvas.create_line(cx, cy, cx+r*0.5*math.cos(ang_h),
-                       cy+r*0.5*math.sin(ang_h), fill="white", width=3)
-
-    root.after(1000, dibujar_reloj)
-
-# ==========================
-# SELECTOR HORA
-# ==========================
-def abrir_selector_hora():
-    ventana = tk.Toplevel(root)
-    ventana.title("Seleccionar hora")
-    ventana.geometry("250x180")
-    ventana.configure(bg="#2a2a40")
-
-    spin_h = tk.Spinbox(ventana, from_=0, to=23, format="%02.0f")
-    spin_h.pack(pady=10)
-
-    spin_m = tk.Spinbox(ventana, from_=0, to=59, format="%02.0f")
-    spin_m.pack(pady=10)
-
-    def confirmar():
-        global hora_seleccionada
-        hora_seleccionada = f"{spin_h.get()}:{spin_m.get()}"
-        btn_hora.config(text=f"⏰ {hora_seleccionada}")
-        ventana.destroy()
-
-    tk.Button(ventana, text="Aceptar",
-              command=confirmar).pack(pady=10)
-
-# ==========================
-# UI MODERNA 🔥
-# ==========================
-root = tk.Tk()
-root.geometry("1100x600")
-root.configure(bg="#1e1e2f")
-
-tk.Label(root, text="📚 Gestor de universitarias",
-         bg="#1e1e2f", fg="white",
-         font=("Segoe UI", 18)).pack(pady=5)
-
-canvas = tk.Canvas(root, width=120, height=120,
-                   bg="#1e1e2f", highlightthickness=0)
-canvas.pack()
-
-frame_inputs = tk.Frame(root, bg="#2a2a40")
-frame_inputs.pack(fill="x", pady=10)
-
-# INPUT MODERNO
-entry_nombre = tk.Entry(frame_inputs,
-                        width=30,
-                        bg="#3a3a55",
-                        fg="white",
-                        insertbackground="white",
-                        relief="flat",
-                        font=("Segoe UI", 10))
-entry_nombre.pack(side="left", padx=10, ipady=6)
-entry_nombre.insert(0, "📝 Ingresa la tarea...")
-
-def hover(e): e.widget.config(bg="#50507a")
-def leave(e): e.widget.config(bg="#3a3a55")
-
-entry_nombre.bind("<Enter>", hover)
-entry_nombre.bind("<Leave>", leave)
-
-# COMBO
-combo_materia = ttk.Combobox(frame_inputs,
-                             values=list(colores_materias.keys()),
-                             state="readonly")
-combo_materia.set("📘 Materia")
-combo_materia.pack(side="left", padx=5)
-
-# CALENDARIO
-cal = DateEntry(frame_inputs, date_pattern="dd/mm/yyyy")
-cal.pack(side="left", padx=5)
-
-# HORA
-btn_hora = tk.Button(frame_inputs,
-                     text="⏰ 12:00",
-                     bg="#3a3a55",
-                     fg="white",
-                     relief="flat",
-                     command=abrir_selector_hora)
-btn_hora.pack(side="left", padx=5)
-
-# BOTÓN
-tk.Button(frame_inputs,
-          text="➕ Agregar",
-          bg="#4D96FF",
-          fg="white",
-          font=("Segoe UI", 10, "bold"),
-          relief="flat",
-          command=agregar_tarea).pack(side="left", padx=10)
-
-# TABLERO
-board = tk.Frame(root, bg="#1e1e2f")
-board.pack(fill="both", expand=True)
-
-columnas = {}
-for estado in ["Pendiente", "Proximo", "Urgente", "Vencido", "Entregado"]:
-    col = tk.Frame(board, bg="#2a2a40")
-    col.pack(side="left", fill="both", expand=True, padx=5)
-
-    tk.Label(col, text=estado,
-             bg="#2a2a40", fg="white").pack()
-
-    inner = tk.Frame(col, bg="#1e1e2f")
-    inner.pack(fill="both", expand=True)
-
-    columnas[estado] = inner
-
-# ==========================
-# INICIO
-# ==========================
-cargar_tareas()
-actualizar_tablero()
-verificar_notificaciones()
-dibujar_reloj()
-
-root.mainloop()
+if __name__ == "__main__":
+    root = tk.Tk()
+    App(root)
+    root.mainloop()
