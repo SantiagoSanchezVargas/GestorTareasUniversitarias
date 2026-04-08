@@ -15,7 +15,7 @@ except ImportError:
 # CONFIG
 # ==========================
 ARCHIVO = "tareas.json"
-USUARIO = "Santiago"
+USUARIO = "Usuario"
 
 MATERIAS = [
     "Operativa",
@@ -61,9 +61,11 @@ class App:
         self.tareas: list[dict] = []
         self.hora_var = tk.StringVar(value="12:00")
         self.profile_image = None
+        self.profile_path = None
 
         self._cargar_tareas()
         self._construir_ui()
+        self._cargar_perfil()
         self.actualizar_tablero()
 
     # ----------------------
@@ -71,21 +73,79 @@ class App:
     # ----------------------
     def _cargar_tareas(self):
         if not os.path.exists(ARCHIVO):
+            self._crear_archivo_vacio()
             return
         try:
             with open(ARCHIVO) as f:
-                for t in json.load(f):
-                    t["fecha"] = datetime.strptime(t["fecha"], "%Y-%m-%d %H:%M")
-                    self.tareas.append(t)
+                data = json.load(f)
+
+            tareas = []
+            if isinstance(data, dict):
+                self.profile_path = data.get("perfil")
+                tareas = data.get("tareas", [])
+            elif isinstance(data, list):
+                tareas = data
+
+            for t in tareas:
+                t["fecha"] = datetime.strptime(t["fecha"], "%Y-%m-%d %H:%M")
+                self.tareas.append(t)
         except (json.JSONDecodeError, KeyError, ValueError):
-            messagebox.showerror("Error", "No se pudo cargar el archivo de tareas.")
+            self.tareas = []
+            self.profile_path = None
+            self._crear_archivo_vacio()
+
+    def _crear_archivo_vacio(self):
+        payload = {"perfil": None, "tareas": []}
+        with open(ARCHIVO, "w") as f:
+            json.dump(payload, f, indent=4)
 
     def _guardar_tareas(self):
+        payload = {
+            "perfil": self.profile_path,
+            "tareas": [{**t, "fecha": t["fecha"].strftime("%Y-%m-%d %H:%M")} for t in self.tareas],
+        }
         with open(ARCHIVO, "w") as f:
-            json.dump(
-                [{**t, "fecha": t["fecha"].strftime("%Y-%m-%d %H:%M")} for t in self.tareas],
-                f, indent=4
-            )
+            json.dump(payload, f, indent=4)
+
+    def _cargar_perfil(self):
+        if not self.profile_path:
+            return
+        if not os.path.exists(self.profile_path):
+            return
+        self._mostrar_avatar_por_ruta(self.profile_path)
+
+    def _mostrar_avatar_por_ruta(self, ruta: str):
+        self.avatar_canvas.delete("all")
+        self.avatar_canvas.create_oval(4, 4, 86, 86, fill="#d6ecff", outline="#4D96FF", width=3)
+
+        if PIL_AVAILABLE:
+            try:
+                imagen = Image.open(ruta).convert("RGBA")
+            except Exception:
+                return
+
+            ancho, alto = imagen.size
+            lado = min(ancho, alto)
+            izquierda = (ancho - lado) // 2
+            superior = (alto - lado) // 2
+            imagen = imagen.crop((izquierda, superior, izquierda + lado, superior + lado))
+            imagen = imagen.resize((80, 80), Image.LANCZOS)
+
+            from PIL import ImageDraw
+            mask = Image.new("L", (80, 80), 0)
+            draw = ImageDraw.Draw(mask)
+            draw.ellipse((0, 0, 80, 80), fill=255)
+            imagen.putalpha(mask)
+
+            self.profile_image = ImageTk.PhotoImage(imagen)
+        else:
+            try:
+                self.profile_image = tk.PhotoImage(file=ruta)
+            except tk.TclError:
+                return
+
+        self.avatar_canvas.create_image(45, 45, image=self.profile_image)
+        self.avatar_canvas.image = self.profile_image
 
     # ----------------------
     # LÓGICA DE ESTADO
@@ -310,14 +370,18 @@ class App:
             self.avatar_canvas.create_image(45, 45, image=self.profile_image)
             self.avatar_canvas.image = self.profile_image
         else:
-            try:
-                imagen = tk.PhotoImage(file=ruta)
-            except tk.TclError:
-                messagebox.showerror("Error", "Solo se admiten archivos PNG o GIF si Pillow no está instalado.")
-                return
-            self.profile_image = imagen
-            self.avatar_canvas.create_image(45, 45, image=self.profile_image)
-            self.avatar_canvas.image = self.profile_image
+            if not self._mostrar_avatar_por_ruta(ruta):
+                try:
+                    imagen = tk.PhotoImage(file=ruta)
+                except tk.TclError:
+                    messagebox.showerror("Error", "Solo se admiten archivos PNG o GIF si Pillow no está instalado.")
+                    return
+                self.profile_image = imagen
+                self.avatar_canvas.create_image(45, 45, image=self.profile_image)
+                self.avatar_canvas.image = self.profile_image
+
+        self.profile_path = ruta
+        self._guardar_tareas()
 
     # ----------------------
     # RELOJ ANALÓGICO
