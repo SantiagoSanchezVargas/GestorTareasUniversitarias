@@ -1,0 +1,4 @@
+tkcalendar
+pillow
+pystray
+plyer

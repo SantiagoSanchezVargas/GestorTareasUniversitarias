@@ -4,6 +4,18 @@ from tkcalendar import DateEntry
 from datetime import datetime, timedelta
 import json, os
 import math
+import threading
+import time
+try:
+    from pystray import Icon, Menu, MenuItem
+    PYSTRAY_AVAILABLE = True
+except ImportError:
+    PYSTRAY_AVAILABLE = False
+try:
+    from plyer.notification import notify
+    PLYER_AVAILABLE = True
+except ImportError:
+    PLYER_AVAILABLE = False
 
 try:
     from PIL import Image, ImageTk
@@ -47,6 +59,145 @@ COLORES_ESTADO = {
 }
 
 ESTADOS = ["Pendiente", "Proximo", "Urgente", "Vencido", "Entregado"]
+
+# Emojis por materia para notificaciones
+EMOJIS_MATERIAS = {
+    "Operativa": "🧮",
+    "Big Data": "📊",
+    "Analisis numerico": "📈",
+    "Comunicación de datos": "📡",
+    "Emprendimiento e innovación": "💡",
+    "Ciencia, tecnología e innovación": "🔬",
+    "Seguridad en hardware": "🔐",
+}
+
+# Archivo para rastrear notificaciones del día
+NOTIFICACIONES_HOY_FILE = "notificaciones_hoy.json"
+
+
+def obtener_notificaciones_hoy() -> set:
+    """Obtiene el conjunto de IDs de tareas notificadas hoy."""
+    hoy = datetime.now().date()
+    if not os.path.exists(NOTIFICACIONES_HOY_FILE):
+        return set()
+    try:
+        with open(NOTIFICACIONES_HOY_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("fecha") != str(hoy):
+            return set()
+        return set(data.get("tarea_ids", []))
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+
+def guardar_notificaciones_hoy(tarea_ids: set):
+    """Guarda las IDs de tareas notificadas hoy."""
+    hoy = datetime.now().date()
+    data = {
+        "fecha": str(hoy),
+        "tarea_ids": list(tarea_ids)
+    }
+    try:
+        with open(NOTIFICACIONES_HOY_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+    except OSError:
+        pass  # Ignorar errores de escritura
+
+
+def enviar_notificacion(titulo: str, mensaje: str):
+    """Envía una notificación inteligente con plyer."""
+    if PLYER_AVAILABLE:
+        try:
+            notify(
+                title=titulo,
+                message=mensaje,
+                timeout=15,
+                app_name="Gestor de Tareas"
+            )
+        except Exception:
+            pass  # Ignorar errores de notificación
+
+
+def monitoreo_tareas_background(archivo_tareas: str = ARCHIVO):
+    """
+    Hilo de monitoreo que se ejecuta inmediatamente y luego cada 30 minutos.
+    Verifica tareas próximas a vencer y envía notificaciones.
+    """
+    def ejecutar_monitoreo():
+        while True:
+            try:
+                ahora = datetime.now()
+                notificaciones_hoy = obtener_notificaciones_hoy()
+
+                # Leer tareas.json con manejo robusto de errores
+                tareas = []
+                if os.path.exists(archivo_tareas):
+                    try:
+                        with open(archivo_tareas, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                        if isinstance(data, dict):
+                            tareas = data.get("tareas", [])
+                        elif isinstance(data, list):
+                            tareas = data
+                    except (json.JSONDecodeError, OSError):
+                        tareas = []
+
+                # Procesar cada tarea
+                for idx, t in enumerate(tareas):
+                    try:
+                        # Crear ID única para la tarea
+                        tarea_id = f"{t.get('nombre', '')}_{t.get('materia', '')}_{t.get('fecha', '')}"
+
+                        # Saltar si ya fue notificada hoy
+                        if tarea_id in notificaciones_hoy:
+                            continue
+
+                        # Parsear fecha si es string
+                        if isinstance(t.get("fecha"), str):
+                            fecha = datetime.strptime(t["fecha"], "%Y-%m-%d %H:%M")
+                        else:
+                            fecha = t.get("fecha")
+
+                        if not fecha:
+                            continue
+
+                        # Solo procesar tareas Pendiente o Proximo
+                        if t.get("entregado"):
+                            continue
+
+                        # Calcular diferencia de tiempo
+                        diff = fecha - ahora
+
+                        # Solo notificar si vence en menos de 24 horas
+                        if timedelta(0) < diff <= timedelta(hours=24):
+                            materia = t.get("materia", "Sin materia")
+                            emoji = EMOJIS_MATERIAS.get(materia, "📝")
+                            horas_restantes = int(diff.total_seconds() / 3600)
+                            minutos_restantes = int((diff.total_seconds() % 3600) / 60)
+
+                            titulo = f"{emoji} {materia}"
+                            tiempo_str = f"{horas_restantes}h {minutos_restantes}m" if horas_restantes > 0 else f"{minutos_restantes}m"
+                            mensaje = f"'{t.get('nombre', 'Tarea sin nombre')}' vence en {tiempo_str}"
+
+                            enviar_notificacion(titulo, mensaje)
+
+                            # Marcar como notificada hoy
+                            notificaciones_hoy.add(tarea_id)
+                            guardar_notificaciones_hoy(notificaciones_hoy)
+                    except Exception:
+                        # Ignorar errores en tareas individuales
+                        continue
+
+                # Esperar 30 minutos (1800 segundos) con sleep eficiente
+                time.sleep(1800)
+
+            except Exception:
+                # Ignorar errores en el bucle principal
+                time.sleep(1800)
+
+    # Crear y iniciar el hilo como daemon
+    hilo = threading.Thread(target=ejecutar_monitoreo, daemon=True)
+    hilo.start()
 
 
 def cargar_perfil():
@@ -305,10 +456,20 @@ class App:
         self.materias = [m["nombre"] for m in profile.get("materias", [])] or MATERIAS
         self.colores_materias = {m["nombre"]: m["color"] for m in profile.get("materias", [])}
         self.profile_photo_path = profile.get("foto")
+        self.tray_icon = None
+
+        # Protocolo para manejar cierre de ventana (minimizar a bandeja)
+        self.root.protocol("WM_DELETE_WINDOW", self._al_cerrar_ventana)
 
         self._cargar_tareas()
         self._construir_ui()
         self.actualizar_tablero()
+
+        # Iniciar hilo de monitoreo de tareas
+        monitoreo_tareas_background(ARCHIVO)
+
+        # Crear icono en la bandeja del sistema (System Tray)
+        self.root.after(100, self._crear_icono_bandeja)
 
     # ----------------------
     # PERSISTENCIA
@@ -985,6 +1146,57 @@ class App:
 
         entry.bind("<FocusIn>", on_focus_in)
         entry.bind("<FocusOut>", on_focus_out)
+
+    # ----------------------
+    # SYSTEM TRAY
+    # ----------------------
+    def _al_cerrar_ventana(self):
+        """Minimiza la ventana a la bandeja en lugar de cerrar."""
+        self.root.withdraw()
+
+    def _abrir_desde_bandeja(self):
+        """Restaura la ventana desde la bandeja."""
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus()
+
+    def _salir_aplicacion(self):
+        """Cierra completamente la aplicación."""
+        try:
+            if self.tray_icon:
+                self.tray_icon.stop()
+        except Exception:
+            pass
+        os._exit(0)
+
+    def _crear_icono_bandeja(self):
+        """Crea el icono en la bandeja del sistema (System Tray)."""
+        if not PYSTRAY_AVAILABLE:
+            return
+
+        try:
+            # Crear menú con opciones
+            menu = Menu(
+                MenuItem("Abrir", self._abrir_desde_bandeja),
+                MenuItem("Salir", self._salir_aplicacion)
+            )
+
+            # Crear icono (usa un píxel de 16x16 como placeholder)
+            from PIL import Image
+            imagen = Image.new("RGB", (64, 64), color=(79, 150, 255))  # Color azul
+            self.tray_icon = Icon("GestorTareas", imagen, menu=menu)
+
+            # Ejecutar el icono en un hilo separado
+            def run_tray():
+                try:
+                    self.tray_icon.run()
+                except Exception:
+                    pass
+
+            hilo_tray = threading.Thread(target=run_tray, daemon=True)
+            hilo_tray.start()
+        except Exception:
+            pass  # Ignorar si falla la creación del icono
 
     @staticmethod
     def _hover(btn: tk.Button, c1: str, c2: str):
