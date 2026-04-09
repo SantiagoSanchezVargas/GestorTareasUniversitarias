@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import messagebox, ttk, filedialog
+from tkinter import messagebox, ttk, filedialog, colorchooser
 from tkcalendar import DateEntry
 from datetime import datetime, timedelta
 import json, os
@@ -15,6 +15,7 @@ except ImportError:
 # CONFIG
 # ==========================
 ARCHIVO = "tareas.json"
+PERFIL_ARCHIVO = "perfil.json"
 USUARIO = "Usuario"
 
 MATERIAS = [
@@ -48,11 +49,248 @@ COLORES_ESTADO = {
 ESTADOS = ["Pendiente", "Proximo", "Urgente", "Vencido", "Entregado"]
 
 
+def cargar_perfil():
+    if not os.path.exists(PERFIL_ARCHIVO):
+        return None
+    try:
+        with open(PERFIL_ARCHIVO, "r", encoding="utf-8") as f:
+            perfil = json.load(f)
+        if not isinstance(perfil, dict):
+            return None
+        if not perfil.get("materias"):
+            return None
+        return perfil
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def guardar_perfil(perfil):
+    with open(PERFIL_ARCHIVO, "w", encoding="utf-8") as f:
+        json.dump(perfil, f, indent=4, ensure_ascii=False)
+
+
+def iniciar_onboarding():
+    root = tk.Tk()
+    setup = ProfileSetup(root)
+    root.mainloop()
+    return setup.result
+
+
+class ProfileSetup:
+    def __init__(self, root: tk.Tk):
+        self.root = root
+        self.root.title("Configurar perfil")
+        self.root.geometry("680x750")
+        self.root.configure(bg="#edf2f7")
+        self.root.resizable(True, True)
+        self.result = None
+        self.materia_rows = []
+
+        # Configurar grid principal para que se adapte
+        self.root.grid_rowconfigure(1, weight=1)
+        self.root.grid_columnconfigure(0, weight=1)
+
+        # Header
+        header = tk.Frame(self.root, bg="#edf2f7")
+        header.grid(row=0, column=0, sticky="ew", columnspan=2)
+        tk.Label(header, text="Configura tu cuenta", bg="#edf2f7", fg="#1f2937",
+                 font=("Segoe UI", 18, "bold")).pack(anchor="w", padx=24, pady=(12, 4))
+        tk.Label(header, text="Completa tu perfil y agrega las materias con colores.",
+                 bg="#edf2f7", fg="#475569", font=("Segoe UI", 10)).pack(anchor="w", padx=24, pady=(0, 12))
+
+        # Canvas scrolleable responsive
+        canvas = tk.Canvas(self.root, bg="#edf2f7", bd=0, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self.root, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas, bg="#edf2f7")
+
+        # Configurar grid en scrollable_frame para que ocupe todo el ancho
+        scrollable_frame.grid_columnconfigure(0, weight=1)
+
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Actualizar ancho del canvas cuando se redimensiona la ventana
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+            canvas.configure(scrollregion=canvas.bbox("all"))
+
+        canvas.bind("<Configure>", _on_canvas_configure)
+
+        # Vincular rueda del ratón
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        canvas.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 10))
+        scrollbar.grid(row=1, column=1, sticky="ns", pady=(0, 10))
+
+        # Contenido dentro del frame scrolleable - usar grid para mejor control
+        card = tk.Frame(scrollable_frame, bg="white", bd=0, highlightthickness=0)
+        card.grid(row=0, column=0, sticky="ew", padx=0, pady=10)
+        card.grid_columnconfigure(0, weight=1)
+
+        steps_frame = tk.Frame(card, bg="white")
+        steps_frame.grid(row=0, column=0, sticky="ew", pady=(20, 12), padx=20)
+        steps_frame.grid_columnconfigure(0, weight=1)
+        tk.Label(steps_frame, text="1. Datos personales", bg="white", fg="#0f172a",
+                 font=("Segoe UI", 11, "bold")).grid(row=0, column=0, sticky="w")
+        tk.Label(steps_frame, text="2. Materias y colores", bg="white", fg="#0f172a",
+                 font=("Segoe UI", 11, "bold")).grid(row=0, column=1, sticky="w", padx=60)
+
+        separator = ttk.Separator(card, orient="horizontal")
+        separator.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 12))
+
+        form_frame = tk.Frame(card, bg="white")
+        form_frame.grid(row=2, column=0, sticky="ew", padx=20)
+        form_frame.grid_columnconfigure(0, weight=1)
+
+        # Fila 1: Nombre del estudiante
+        label_nombre = tk.Label(form_frame, text="Nombre del estudiante", bg="white", fg="#334155",
+                                font=("Segoe UI", 9, "bold"))
+        label_nombre.grid(row=0, column=0, sticky="w")
+        self.entry_nombre = tk.Entry(form_frame, font=("Segoe UI", 10), bd=0,
+                                     relief="flat", bg="#f8fafc")
+        self.entry_nombre.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+
+        # Fila 2: Perfil / Carrera
+        label_carrera = tk.Label(form_frame, text="Perfil / Carrera", bg="white", fg="#334155",
+                                font=("Segoe UI", 9, "bold"))
+        label_carrera.grid(row=2, column=0, sticky="w")
+        self.entry_carrera = tk.Entry(form_frame, font=("Segoe UI", 10), bd=0,
+                                      relief="flat", bg="#f8fafc")
+        self.entry_carrera.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+
+        # Materias dinámicas
+        label_materias = tk.Label(card, text="Materias dinámicas", bg="white", fg="#334155",
+                 font=("Segoe UI", 11, "bold"))
+        label_materias.grid(row=3, column=0, sticky="w", padx=20, pady=(14, 4))
+        
+        label_desc = tk.Label(card, text="Define tus materias y elige el color que las represente.",
+                 bg="white", fg="#64748b", font=("Segoe UI", 9))
+        label_desc.grid(row=4, column=0, sticky="w", padx=20)
+
+        materias_container = tk.Frame(card, bg="#f8fafc", bd=1, relief="solid")
+        materias_container.grid(row=5, column=0, sticky="ew", padx=20, pady=(10, 12))
+        materias_container.grid_columnconfigure(0, weight=1)
+
+        header_row = tk.Frame(materias_container, bg="#f8fafc")
+        header_row.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 0))
+        header_row.grid_columnconfigure(0, weight=1)
+        tk.Label(header_row, text="Materia", bg="#f8fafc", fg="#475569",
+                 font=("Segoe UI", 9, "bold"), anchor="w").grid(row=0, column=0, sticky="ew")
+        tk.Label(header_row, text="Color", bg="#f8fafc", fg="#475569",
+                 font=("Segoe UI", 9, "bold"), width=12, anchor="w").grid(row=0, column=1, padx=(0, 8))
+        tk.Label(header_row, text="", bg="#f8fafc", width=10).grid(row=0, column=2)
+
+        self.frame_materias = tk.Frame(materias_container, bg="#f8fafc")
+        self.frame_materias.grid(row=1, column=0, sticky="ew", padx=14, pady=(8, 12))
+        self.frame_materias.grid_columnconfigure(0, weight=1)
+
+        action_row = tk.Frame(card, bg="white")
+        action_row.grid(row=6, column=0, sticky="ew", padx=20, pady=(0, 12))
+        action_row.grid_columnconfigure(0, weight=1)
+        
+        self.btn_add_materia = tk.Button(action_row, text="Agregar materia +", bg="#2563eb", fg="white",
+                                         font=("Segoe UI", 10, "bold"), bd=0, activebackground="#1d4ed8",
+                                         padx=14, pady=8, command=self.agregar_materia_fila)
+        self.btn_add_materia.grid(row=0, column=0, sticky="w")
+
+        btn_guardar = tk.Button(action_row, text="Guardar y Comenzar", bg="#14b8a6", fg="white",
+                                font=("Segoe UI", 11, "bold"), bd=0, activebackground="#0d9488",
+                                padx=18, pady=10, command=self.guardar)
+        btn_guardar.grid(row=0, column=0, sticky="e")
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        self.agregar_materia_fila()
+
+    def agregar_materia_fila(self, nombre="", color="#6EC1FF"):
+        row_num = len(self.materia_rows)
+        row = tk.Frame(self.frame_materias, bg="white", bd=1, relief="solid")
+        row.grid(row=row_num, column=0, sticky="ew", pady=6, ipady=6)
+        row.grid_columnconfigure(0, weight=1)
+
+        entry = tk.Entry(row, font=("Segoe UI", 10), bd=0, relief="flat", bg="#f8fafc")
+        entry.insert(0, nombre)
+        entry.grid(row=0, column=0, sticky="ew", padx=(12, 10), pady=8)
+
+        color_var = tk.StringVar(value=color)
+        btn_color = tk.Button(row, text="", bg=color, width=3, bd=0,
+                              command=lambda: self.elegir_color(color_var, btn_color))
+        btn_color.grid(row=0, column=1, padx=(0, 10), sticky="e")
+
+        color_label = tk.Label(row, text=color, bg="#f8fafc", fg="#334155",
+                               font=("Segoe UI", 9), width=12)
+        color_label.grid(row=0, column=2, padx=(0, 20), sticky="w")
+
+        btn_quitar = tk.Button(row, text="✕", bg="#ef4444", fg="white", width=3, bd=0,
+                               activebackground="#dc2626",
+                               command=lambda: self.quitar_materia_fila(row))
+        btn_quitar.grid(row=0, column=3, padx=10, pady=8, sticky="e")
+
+        def actualizar_color_label(*args):
+            color_label.config(text=color_var.get())
+
+        color_var.trace_add("write", actualizar_color_label)
+        self.materia_rows.append({"frame": row, "entry": entry, "color_var": color_var, "button": btn_color})
+
+    def quitar_materia_fila(self, row):
+        for item in self.materia_rows:
+            if item["frame"] is row:
+                item["frame"].destroy()
+                self.materia_rows.remove(item)
+                # Reconfigure grid para las filas restantes
+                for idx, row_data in enumerate(self.materia_rows):
+                    row_data["frame"].grid(row=idx, column=0, sticky="ew", pady=6, ipady=6)
+                return
+
+    def elegir_color(self, color_var, btn):
+        _, color = colorchooser.askcolor(initialcolor=color_var.get(), parent=self.root)
+        if color:
+            color_var.set(color)
+            btn.config(bg=color)
+
+    def guardar(self):
+        nombre = self.entry_nombre.get().strip()
+        carrera = self.entry_carrera.get().strip()
+        materias = []
+        for item in self.materia_rows:
+            materia = item["entry"].get().strip()
+            color = item["color_var"].get()
+            if materia:
+                materias.append({"nombre": materia, "color": color})
+
+        if not nombre:
+            messagebox.showwarning("Atención", "Escribe el nombre del estudiante.", parent=self.root)
+            return
+        if not carrera:
+            messagebox.showwarning("Atención", "Escribe el perfil / carrera.", parent=self.root)
+            return
+        if not materias:
+            messagebox.showwarning("Atención", "Agrega al menos una materia.", parent=self.root)
+            return
+
+        perfil = {"nombre": nombre, "carrera": carrera, "materias": materias}
+        guardar_perfil(perfil)
+        self.result = perfil
+        self.root.destroy()
+
+    def on_close(self):
+        self.result = None
+        self.root.destroy()
+
+
 # ==========================
 # CLASE PRINCIPAL
 # ==========================
 class App:
-    def __init__(self, root: tk.Tk):
+    def __init__(self, root: tk.Tk, profile: dict):
         self.root = root
         self.root.title("Gestor de Tareas")
         self.root.geometry("1200x650")
@@ -61,11 +299,15 @@ class App:
         self.tareas: list[dict] = []
         self.hora_var = tk.StringVar(value="12:00")
         self.profile_image = None
-        self.profile_path = None
+        self.profile = profile
+        self.usuario = profile.get("nombre", USUARIO)
+        self.carrera = profile.get("carrera", "")
+        self.materias = [m["nombre"] for m in profile.get("materias", [])] or MATERIAS
+        self.colores_materias = {m["nombre"]: m["color"] for m in profile.get("materias", [])}
+        self.profile_photo_path = profile.get("foto")
 
         self._cargar_tareas()
         self._construir_ui()
-        self._cargar_perfil()
         self.actualizar_tablero()
 
     # ----------------------
@@ -73,46 +315,38 @@ class App:
     # ----------------------
     def _cargar_tareas(self):
         if not os.path.exists(ARCHIVO):
-            self._crear_archivo_vacio()
+            self._crear_archivo_tareas()
             return
         try:
-            with open(ARCHIVO) as f:
+            with open(ARCHIVO, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
             tareas = []
             if isinstance(data, dict):
-                self.profile_path = data.get("perfil")
                 tareas = data.get("tareas", [])
             elif isinstance(data, list):
                 tareas = data
+            else:
+                tareas = []
 
             for t in tareas:
                 t["fecha"] = datetime.strptime(t["fecha"], "%Y-%m-%d %H:%M")
                 self.tareas.append(t)
-        except (json.JSONDecodeError, KeyError, ValueError):
+        except (json.JSONDecodeError, KeyError, ValueError, OSError):
             self.tareas = []
-            self.profile_path = None
-            self._crear_archivo_vacio()
+            self._crear_archivo_tareas()
 
-    def _crear_archivo_vacio(self):
-        payload = {"perfil": None, "tareas": []}
-        with open(ARCHIVO, "w") as f:
-            json.dump(payload, f, indent=4)
+    def _crear_archivo_tareas(self):
+        with open(ARCHIVO, "w", encoding="utf-8") as f:
+            json.dump([], f, indent=4)
 
     def _guardar_tareas(self):
-        payload = {
-            "perfil": self.profile_path,
-            "tareas": [{**t, "fecha": t["fecha"].strftime("%Y-%m-%d %H:%M")} for t in self.tareas],
-        }
-        with open(ARCHIVO, "w") as f:
-            json.dump(payload, f, indent=4)
-
-    def _cargar_perfil(self):
-        if not self.profile_path:
-            return
-        if not os.path.exists(self.profile_path):
-            return
-        self._mostrar_avatar_por_ruta(self.profile_path)
+        with open(ARCHIVO, "w", encoding="utf-8") as f:
+            json.dump(
+                [{**t, "fecha": t["fecha"].strftime("%Y-%m-%d %H:%M")} for t in self.tareas],
+                f, indent=4,
+                ensure_ascii=False
+            )
 
     def _mostrar_avatar_por_ruta(self, ruta: str):
         self.avatar_canvas.delete("all")
@@ -380,8 +614,9 @@ class App:
                 self.avatar_canvas.create_image(45, 45, image=self.profile_image)
                 self.avatar_canvas.image = self.profile_image
 
-        self.profile_path = ruta
-        self._guardar_tareas()
+        self.profile_photo_path = ruta
+        self.profile["foto"] = ruta
+        guardar_perfil(self.profile)
 
     # ----------------------
     # RELOJ ANALÓGICO
@@ -494,7 +729,7 @@ class App:
                 card = tk.Frame(inner, bg="white", bd=borde, relief="solid")
             card.pack(fill="x", padx=8, pady=5)
 
-            color_materia = COLORES_MATERIAS.get(t["materia"], "#ddd")
+            color_materia = self.colores_materias.get(t["materia"], "#ddd")
             color_estado  = COLORES_ESTADO[estado]
 
             barra = tk.Frame(card, bg=color_estado, width=6)
@@ -552,19 +787,22 @@ class App:
         self.avatar_canvas.pack()
         self.avatar_canvas.bind("<Button-3>", lambda e: self.cambiar_foto_perfil())
 
+        if self.profile_photo_path and os.path.exists(self.profile_photo_path):
+            self._mostrar_avatar_por_ruta(self.profile_photo_path)
+
         frame_identidad = tk.Frame(frame_izq, bg="#cfe9ff")
         frame_identidad.pack(side="left", padx=12, anchor="w")
 
         tk.Label(
             frame_identidad,
-            text=f"👋 Hola, {USUARIO}",
+            text=f"👋 Hola, {self.usuario}",
             bg="#cfe9ff", fg="#003366",
             font=("Segoe UI", 18, "bold")
         ).pack(anchor="w")
 
         tk.Label(
             frame_identidad,
-            text="📚 Gestor de tareas universitarias",
+            text=f"📚 {self.carrera}",
             bg="#cfe9ff", fg="#005b96",
             font=("Segoe UI", 12)
         ).pack(anchor="w", pady=(4, 0))
@@ -607,7 +845,7 @@ class App:
         materia_frame.pack(side="left", padx=4, fill="x", expand=True)
         tk.Label(materia_frame, text="Materia", bg="#e6f7ff", fg="#003366").pack(anchor="w")
         self.combo_materia = ttk.Combobox(
-            materia_frame, values=MATERIAS, state="readonly", width=28
+            materia_frame, values=self.materias, state="readonly", width=28
         )
         self.combo_materia.pack(fill="x")
 
@@ -664,7 +902,7 @@ class App:
         tk.Label(filtro_frame, text="Filtro materia", bg="#e6f7ff", fg="#003366").pack(anchor="e")
         self.combo_filtro = ttk.Combobox(
             filtro_frame,
-            values=["Todas"] + MATERIAS,
+            values=["Todas"] + self.materias,
             state="readonly",
             width=24,
             textvariable=self.filtro_materia
@@ -756,8 +994,14 @@ class App:
 
 # ==========================
 # ENTRADA
-# ==========================
+# =========================
 if __name__ == "__main__":
+    perfil = cargar_perfil()
+    if not perfil:
+        perfil = iniciar_onboarding()
+        if not perfil:
+            raise SystemExit
+
     root = tk.Tk()
-    App(root)
+    App(root, perfil)
     root.mainloop()
