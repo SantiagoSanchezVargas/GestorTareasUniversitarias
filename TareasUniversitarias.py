@@ -232,7 +232,7 @@ class ProfileSetup:
         canvas_frame.grid_rowconfigure(0, weight=1)
         canvas_frame.grid_columnconfigure(0, weight=1)
 
-        self.canvas = ctk.CTkCanvas(canvas_frame, bg_color="transparent", highlightthickness=0)
+        self.canvas = ctk.CTkCanvas(canvas_frame, highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky="nsew")
 
         scrollbar = ctk.CTkScrollbar(canvas_frame, command=self.canvas.yview)
@@ -702,8 +702,6 @@ class App:
         self.avatar_canvas = ctk.CTkCanvas(
             avatar_frame,
             width=90, height=90,
-            corner_radius=45,
-            bg_color="transparent",
             highlightthickness=0
         )
         self.avatar_canvas.pack()
@@ -735,7 +733,6 @@ class App:
         self.canvas_reloj = ctk.CTkCanvas(
             clock_frame,
             width=140, height=140,
-            bg_color="transparent",
             highlightthickness=0
         )
         self.canvas_reloj.pack()
