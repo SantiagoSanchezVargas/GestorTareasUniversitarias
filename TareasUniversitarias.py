@@ -1,5 +1,7 @@
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import messagebox, filedialog, colorchooser
+import tkinter.ttk as ttk
 from tkcalendar import DateEntry
 from datetime import datetime, timedelta
 import json, os
@@ -41,6 +43,16 @@ COLORES_ESTADO = {
 }
 
 ESTADOS = ["Pendiente", "Proximo", "Urgente", "Vencido", "Entregado"]
+
+MATERIAS = [
+    "Operativa",
+    "Big Data",
+    "Analisis numerico",
+    "Comunicación de datos",
+    "Emprendimiento e innovación",
+    "Ciencia, tecnología e innovación",
+    "Seguridad en hardware",
+]
 
 EMOJIS_MATERIAS = {
     "Operativa": "🧮",
@@ -1228,7 +1240,9 @@ if __name__ == "__main__":
     app = App(root, perfil)
     root.mainloop()
 import customtkinter as ctk
+import tkinter as tk
 from tkinter import messagebox, filedialog, colorchooser
+import tkinter.ttk as ttk
 from tkcalendar import DateEntry
 from datetime import datetime, timedelta
 import json, os
@@ -1271,6 +1285,16 @@ COLORES_ESTADO = {
 
 
 ESTADOS = ["Pendiente", "Proximo", "Urgente", "Vencido", "Entregado"]
+
+MATERIAS = [
+    "Operativa",
+    "Big Data",
+    "Analisis numerico",
+    "Comunicación de datos",
+    "Emprendimiento e innovación",
+    "Ciencia, tecnología e innovación",
+    "Seguridad en hardware",
+]
 
 # Emojis por materia para notificaciones
 EMOJIS_MATERIAS = {
