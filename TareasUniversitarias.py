@@ -474,7 +474,7 @@ class App:
         self.profile = profile
         self.usuario = profile.get("nombre", USUARIO)
         self.carrera = profile.get("carrera", "")
-        self.materias = [m["nombre"] for m in profile.get("materias", [])]
+        self.materias = [m["nombre"] for m in profile.get("materias", [])] or MATERIAS
         self.colores_materias = {m["nombre"]: m["color"] for m in profile.get("materias", [])}
         self.profile_photo_path = profile.get("foto")
         self.tray_icon = None
